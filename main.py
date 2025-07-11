@@ -1,13 +1,15 @@
 import streamlit as st
+import uuid
+import time
 from utils.youtube_utils import extract_video_id, fetch_transcript
 from utils.rag_utils import process_transcript
 from utils.chain_utils import build_rag_chain
-import uuid
 
-## Page config
+# Page configuration
 st.set_page_config(page_title="YouTube RAG Assistant", layout="wide")
+st.title("🎥 YouTube Video Assistant")
 
-# Initialize state
+# Initialize session state
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "rag_chain" not in st.session_state:
@@ -15,10 +17,7 @@ if "rag_chain" not in st.session_state:
 if "session_id" not in st.session_state:
     st.session_state.session_id = None
 
-# Header
-st.title("🎥 YouTube Video Assistant")
-
-# YouTube URL input
+# YouTube video input
 url = st.text_input("Enter YouTube video URL:")
 
 if url:
@@ -29,55 +28,60 @@ if url:
         with video_col:
             st.subheader("📺 Video")
             st.video(f"https://www.youtube.com/embed/{video_id}")
-            if st.button("Process Video"):
+            if st.button("📥 Process Video"):
                 with st.spinner("Processing transcript..."):
                     try:
                         transcript = fetch_transcript(video_id)
                         retriever = process_transcript(transcript, video_id)
-                        # Generate a unique session ID
-                        st.session_state.session_id = str(uuid.uuid4())
-                        chain = build_rag_chain(retriever, st.session_state.session_id)
-                        st.session_state.rag_chain = chain
-                        st.session_state.messages = []
-                        st.success("Chatbot is ready!")
+                        session_id = str(uuid.uuid4())
+                        st.session_state.rag_chain = build_rag_chain(retriever, session_id)
+                        st.session_state.session_id = session_id
+                        st.session_state.messages = []  # Clear previous chat
+                        st.success("✅ Chatbot is ready!")
                     except Exception as e:
-                        st.error(f"Error: {e}")
+                        st.error(f"❌ Error: {e}")
 
         with chat_col:
             st.subheader("💬 Chat")
 
-            if st.session_state.rag_chain and st.session_state.session_id:
-                # Display all chat messages (top-down)
+            if st.session_state.rag_chain:
+                # Display chat history
                 for msg in st.session_state.messages:
                     with st.chat_message(msg["role"]):
                         st.markdown(msg["content"])
 
-                # Chat input at the bottom
-                user_input = st.chat_input("Ask about the video...")
+                # Chat input at bottom
+                prompt = st.chat_input("Ask about the video...")
 
-                if user_input:
-                    # Save user message
-                    st.session_state.messages.append({"role": "user", "content": user_input})
+                if prompt:
+                    # Append user message
+                    st.session_state.messages.append({"role": "user", "content": prompt})
                     with st.chat_message("user"):
-                        st.markdown(user_input)
+                        st.markdown(prompt)
 
-                    try:
-                        # Get assistant response with session_id in config
-                        response = st.session_state.rag_chain.invoke(
-                            {"question": user_input},
-                            config={"configurable": {"session_id": st.session_state.session_id}}
-                        )
-                        st.session_state.messages.append({"role": "assistant", "content": response})
-                        with st.chat_message("assistant"):
-                            st.markdown(response)
-                    except Exception as e:
-                        err_msg = f"❌ Error: {e}"
-                        st.session_state.messages.append({"role": "assistant", "content": err_msg})
-                        with st.chat_message("assistant"):
-                            st.error(err_msg)
+                    with st.chat_message("assistant"):
+                        response_box = st.empty()
+                        full_response = ""
+                        try:
+                            response = st.session_state.rag_chain.invoke(
+                                {"question": prompt},
+                                config={"configurable": {"session_id": st.session_state.session_id}}
+                            )
+                            # Simulate streaming response
+                            for word in response.split():
+                                full_response += word + " "
+                                time.sleep(0.03)
+                                response_box.markdown(full_response + "▌")
+                            response_box.markdown(full_response)
+                        except Exception as e:
+                            full_response = f"❌ Error: {e}"
+                            response_box.error(full_response)
+
+                    # Append assistant message
+                    st.session_state.messages.append({"role": "assistant", "content": full_response})
             else:
-                st.info("Process a video first to enable the chat.")
+                st.info("Please process a video first to enable chat.")
     else:
-        st.error("Invalid YouTube URL.")
+        st.warning("⚠️ Invalid YouTube URL")
 else:
     st.info("Paste a YouTube URL to get started.")
